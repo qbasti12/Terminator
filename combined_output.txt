@@ -1,0 +1,1913 @@
+<!-- FILE: README.md -->
+# TERMINATOR
+
+> A fast, minimal, tiling terminal workspace manager for macOS.
+
+![Tauri](https://img.shields.io/badge/Tauri-v2-CBA6F7)
+![Rust](https://img.shields.io/badge/Rust-backend-F38BA8)
+![React](https://img.shields.io/badge/React-18-89B4FA)
+![xterm.js](https://img.shields.io/badge/xterm.js-WebGL-A6E3A1)
+![Catppuccin](https://img.shields.io/badge/Theme-Catppuccin_Mocha-1E1E2E)
+
+<!-- Add a screenshot here: docs/screenshot.png -->
+```screenshot
+```
+
+## Features
+- Dwindle tiling logic for automatic pane splitting
+- Workspaces as tabs for easy organization
+- High-performance WebGL terminal rendering via xterm.js
+- Configurable keybindings
+- Per-pane status bar showing current working directory and foreground process
+- Built-in settings GUI
+- Warn-on-close for active processes
+- Beautiful Catppuccin Mocha theme out of the box
+- Zero telemetry. Fully offline.
+
+## Requirements
+- macOS 12 Monterey or later
+- Rust (stable, via rustup)
+- Node.js 18+
+- Xcode Command Line Tools
+
+## Installation
+
+```bash
+git clone <repo> terminator
+cd terminator
+npm install
+cargo build
+npm run tauri dev
+```
+
+To build for production:
+
+```bash
+npm run tauri build
+```
+
+## Keybindings
+
+| Action | Default shortcut |
+| --- | --- |
+| New Workspace | ⌘⇧T |
+| Close Workspace | ⌘⇧W |
+| New Terminal | ⌘T |
+| Close Terminal | ⌘W |
+| Focus Up | ⌘↑ |
+| Focus Down | ⌘↓ |
+| Focus Left | ⌘← |
+| Focus Right | ⌘→ |
+| Open Search | ⌘F |
+| Open Settings | ⌘, |
+| Switch Workspace 1-9 | ⌘1 - ⌘9 |
+
+## Configuration
+
+Settings are saved in JSON format at:
+`~/Library/Application Support/terminator/settings.json`
+
+```json
+{
+  "shell": "/bin/zsh",
+  "theme": "catppuccin-mocha",
+  "keybindings": {
+    "newWorkspace": "Meta+Shift+T",
+    "closeWorkspace": "Meta+Shift+W",
+    "newTerminal": "Meta+T",
+    "closeTerminal": "Meta+W",
+    "focusUp": "Meta+ArrowUp",
+    "focusDown": "Meta+ArrowDown",
+    "focusLeft": "Meta+ArrowLeft",
+    "focusRight": "Meta+ArrowRight",
+    "openSearch": "Meta+F",
+    "openSettings": "Meta+Comma",
+    "switchWorkspace1": "Meta+1",
+    "switchWorkspace2": "Meta+2",
+    "switchWorkspace3": "Meta+3",
+    "switchWorkspace4": "Meta+4",
+    "switchWorkspace5": "Meta+5",
+    "switchWorkspace6": "Meta+6",
+    "switchWorkspace7": "Meta+7",
+    "switchWorkspace8": "Meta+8",
+    "switchWorkspace9": "Meta+9"
+  }
+}
+```
+
+- **shell**: The shell executable to run in new terminals.
+- **theme**: The color theme to use (currently only "catppuccin-mocha").
+- **keybindings**: A map of actions to key combinations.
+
+## Tiling model
+
+Terminator uses a dwindle tiling model. When you split a pane, it divides the currently focused pane into two based on the split direction (horizontal or vertical) which is calculated from the cursor position. The remaining space is continually subdivided as you add more panes.
+
+```text
+[ A ] -> Split Horizontal -> [ A | B ] -> Split Vertical on A -> [ [A/C] | B ]
+```
+
+## Architecture
+
+Terminator is built with a three-layer architecture:
+- **macOS PTY**: The native pseudoterminal interface.
+- **Rust Backend**: Manages PTY processes using the `portable-pty` crate and handles IPC via Tauri.
+- **React Frontend**: Renders the UI and terminal emulators using `xterm.js` with the WebGL addon for fast, hardware-accelerated rendering.
+
+## Roadmap
+- Additional themes (Tokyo Night, Gruvbox, Nord)
+- Session persistence (restore workspaces on relaunch)
+- URL / path detection and click-to-open
+- Font size control via settings GUI
+- Linux support (wayland + x11)
+
+## License
+MIT
+
+// FILE: src-tauri/Cargo.toml
+[package]
+name = "terminator"
+version = "0.1.0"
+description = "A fast, minimal, tiling terminal workspace manager for macOS."
+authors = ["you"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2.0.0-beta", features = [] }
+
+[dependencies]
+tauri = { version = "2.0.0-beta", features = [] }
+tauri-plugin-shell = "2.0.0-beta"
+tauri-plugin-dialog = "2.0.0-beta"
+portable-pty = "0.8.1"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+once_cell = "1.18"
+uuid = { version = "1.6", features = ["v4"] }
+sysinfo = "0.30.5"
+lazy_static = "1.4.0"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
+
+// FILE: src-tauri/tauri.conf.json
+{
+  "$schema": "https://schema.tauri.app/2.0.0-beta/tauri.schema.json",
+  "productName": "terminator",
+  "version": "0.1.0",
+  "identifier": "com.terminator.dev",
+  "build": {
+    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist",
+    "devUrl": "http://localhost:1420"
+  },
+  "app": {
+    "windows": [
+      {
+        "title": "Terminator",
+        "width": 1000,
+        "height": 700,
+        "decorations": true,
+        "transparent": true
+      }
+    ],
+    "security": {
+      "csp": null
+    }
+  }
+}
+
+// FILE: src-tauri/src/main.rs
+// FILE: src-tauri/src/main.rs
+#![cfg_attr(
+    all(not(debug_assertions), target_os = "windows"),
+    windows_subsystem = "windows"
+)]
+
+mod pty_manager;
+mod settings;
+
+fn main() {
+    tauri::Builder::default()
+        .plugin(tauri_plugin_shell::init())
+        .plugin(tauri_plugin_dialog::init())
+        .invoke_handler(tauri::generate_handler![
+            pty_manager::spawn_pty,
+            pty_manager::kill_pty,
+            pty_manager::write_pty,
+            pty_manager::resize_pty,
+            pty_manager::get_cwd,
+            pty_manager::get_process_name,
+            settings::get_settings,
+            settings::save_settings,
+        ])
+        .run(tauri::generate_context!())
+        .expect("error while running tauri application");
+}
+
+// FILE: src-tauri/src/pty_manager.rs
+// FILE: src-tauri/src/pty_manager.rs
+use portable_pty::{CommandBuilder, NativePtySystem, PtySize, PtySystem};
+use serde::Serialize;
+use std::collections::HashMap;
+use std::io::{Read, Write};
+use std::sync::{Arc, Mutex};
+use std::thread;
+use sysinfo::{ProcessRefreshKind, RefreshKind, System};
+use tauri::{AppHandle, Emitter};
+
+type PtyId = String;
+
+pub struct PtyHandle {
+    pub child: Box<dyn portable_pty::Child + Send + Sync>,
+    pub writer: Box<dyn Write + Send>, // Remove Sync
+    pub master_pty: Box<dyn portable_pty::MasterPty + Send>, // Remove Sync
+}
+
+lazy_static::lazy_static! {
+    static ref PTY_MAP: Arc<Mutex<HashMap<PtyId, PtyHandle>>> = Arc::new(Mutex::new(HashMap::new()));
+}
+
+#[derive(Clone, Serialize)]
+struct PtyDataPayload {
+    id: PtyId,
+    data: Vec<u8>,
+}
+
+#[derive(Clone, Serialize)]
+struct PtyExitPayload {
+    id: PtyId,
+    code: i32,
+}
+
+#[tauri::command]
+pub fn spawn_pty(app: AppHandle, shell: String, cols: u16, rows: u16) -> Result<PtyId, String> {
+    let pty_system = NativePtySystem::default();
+
+    let pair = pty_system
+        .openpty(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        })
+        .map_err(|e| e.to_string())?;
+
+    let cmd = CommandBuilder::new(shell);
+    let child = pair.slave.spawn_command(cmd).map_err(|e| e.to_string())?;
+
+    let writer = pair.master.take_writer().map_err(|e| e.to_string())?;
+    let mut reader = pair.master.try_clone_reader().map_err(|e| e.to_string())?;
+
+    let id = uuid::Uuid::new_v4().to_string();
+
+    let pty_handle = PtyHandle {
+        child,
+        writer,
+        master_pty: pair.master,
+    };
+
+    PTY_MAP.lock().unwrap().insert(id.clone(), pty_handle);
+
+    let id_clone = id.clone();
+    thread::spawn(move || {
+        let mut buf = [0u8; 1024];
+        loop {
+            match reader.read(&mut buf) {
+                Ok(0) => break,
+                Ok(n) => {
+                    let _ = app.emit(
+                        "pty-data",
+                        PtyDataPayload {
+                            id: id_clone.clone(),
+                            data: buf[..n].to_vec(),
+                        },
+                    );
+                }
+                Err(_) => break,
+            }
+        }
+
+        let _ = app.emit(
+            "pty-exit",
+            PtyExitPayload {
+                id: id_clone.clone(),
+                code: 0,
+            },
+        );
+    });
+
+    Ok(id)
+}
+
+#[tauri::command]
+pub fn kill_pty(id: PtyId) -> Result<(), String> {
+    let mut map = PTY_MAP.lock().unwrap();
+    if let Some(mut handle) = map.remove(&id) {
+        let _ = handle.child.kill();
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn write_pty(id: PtyId, data: Vec<u8>) -> Result<(), String> {
+    let mut map = PTY_MAP.lock().unwrap();
+    if let Some(handle) = map.get_mut(&id) {
+        let _ = handle.writer.write_all(&data);
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn resize_pty(id: PtyId, cols: u16, rows: u16) -> Result<(), String> {
+    let map = PTY_MAP.lock().unwrap();
+    if let Some(handle) = map.get(&id) {
+        let _ = handle.master_pty.resize(PtySize {
+            rows,
+            cols,
+            pixel_width: 0,
+            pixel_height: 0,
+        });
+    }
+    Ok(())
+}
+
+#[tauri::command]
+pub fn get_cwd(id: PtyId) -> Result<String, String> {
+    let map = PTY_MAP.lock().unwrap();
+    if let Some(handle) = map.get(&id) {
+        if let Some(pid) = handle.child.process_id() {
+            if let Ok(cwd) = std::fs::read_link(format!("/proc/{}/cwd", pid)) {
+                return Ok(cwd.to_string_lossy().to_string());
+            }
+        }
+    }
+    Ok(String::new())
+}
+
+#[tauri::command]
+pub fn get_process_name(id: PtyId) -> Result<String, String> {
+    let map = PTY_MAP.lock().unwrap();
+    if let Some(handle) = map.get(&id) {
+        if let Some(pid) = handle.child.process_id() {
+            let mut sys = System::new_with_specifics(
+                RefreshKind::new().with_processes(ProcessRefreshKind::new()),
+            );
+            sys.refresh_processes();
+            if let Some(process) = sys.process(sysinfo::Pid::from_u32(pid)) {
+                return Ok(process.name().to_string());
+            }
+        }
+    }
+    Ok(String::new())
+}
+
+// FILE: src-tauri/src/settings.rs
+// FILE: src-tauri/src/settings.rs
+use serde::{Deserialize, Serialize};
+use std::collections::HashMap;
+use std::fs;
+use std::path::PathBuf;
+use tauri::{AppHandle, Manager};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct Settings {
+    pub shell: String,
+    pub theme: String,
+    pub keybindings: HashMap<String, String>,
+}
+
+impl Default for Settings {
+    fn default() -> Self {
+        let mut keybindings = HashMap::new();
+        keybindings.insert("newWorkspace".to_string(), "Meta+Shift+T".to_string());
+        keybindings.insert("closeWorkspace".to_string(), "Meta+Shift+W".to_string());
+        keybindings.insert("newTerminal".to_string(), "Meta+T".to_string());
+        keybindings.insert("closeTerminal".to_string(), "Meta+W".to_string());
+        keybindings.insert("focusUp".to_string(), "Meta+ArrowUp".to_string());
+        keybindings.insert("focusDown".to_string(), "Meta+ArrowDown".to_string());
+        keybindings.insert("focusLeft".to_string(), "Meta+ArrowLeft".to_string());
+        keybindings.insert("focusRight".to_string(), "Meta+ArrowRight".to_string());
+        keybindings.insert("openSearch".to_string(), "Meta+F".to_string());
+        keybindings.insert("openSettings".to_string(), "Meta+Comma".to_string());
+        keybindings.insert("switchWorkspace1".to_string(), "Meta+1".to_string());
+        keybindings.insert("switchWorkspace2".to_string(), "Meta+2".to_string());
+        keybindings.insert("switchWorkspace3".to_string(), "Meta+3".to_string());
+        keybindings.insert("switchWorkspace4".to_string(), "Meta+4".to_string());
+        keybindings.insert("switchWorkspace5".to_string(), "Meta+5".to_string());
+        keybindings.insert("switchWorkspace6".to_string(), "Meta+6".to_string());
+        keybindings.insert("switchWorkspace7".to_string(), "Meta+7".to_string());
+        keybindings.insert("switchWorkspace8".to_string(), "Meta+8".to_string());
+        keybindings.insert("switchWorkspace9".to_string(), "Meta+9".to_string());
+
+        Settings {
+            shell: "/bin/zsh".to_string(),
+            theme: "catppuccin-mocha".to_string(),
+            keybindings,
+        }
+    }
+}
+
+fn get_settings_path(app: &AppHandle) -> PathBuf {
+    let mut path = app
+        .path()
+        .app_config_dir()
+        .unwrap_or_else(|_| PathBuf::from("."));
+    fs::create_dir_all(&path).ok();
+    path.push("settings.json");
+    path
+}
+
+#[tauri::command]
+pub fn get_settings(app: AppHandle) -> Result<Settings, String> {
+    let path = get_settings_path(&app);
+    if path.exists() {
+        if let Ok(contents) = fs::read_to_string(path) {
+            if let Ok(settings) = serde_json::from_str(&contents) {
+                return Ok(settings);
+            }
+        }
+    }
+    Ok(Settings::default())
+}
+
+#[tauri::command]
+pub fn save_settings(app: AppHandle, settings: Settings) -> Result<(), String> {
+    let path = get_settings_path(&app);
+    if let Ok(contents) = serde_json::to_string_pretty(&settings) {
+        if fs::write(path, contents).is_ok() {
+            return Ok(());
+        }
+    }
+    Err("Failed to save settings".to_string())
+}
+
+// FILE: package.json
+{
+  "name": "terminator",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc && vite build",
+    "preview": "vite preview",
+    "tauri": "tauri"
+  },
+  "dependencies": {
+    "@tauri-apps/api": "^2",
+    "@tauri-apps/plugin-dialog": "^2.7.1",
+    "@xterm/addon-fit": "^0.10.0",
+    "@xterm/addon-search": "^0.15.0",
+    "@xterm/addon-webgl": "^0.18.0",
+    "@xterm/xterm": "^5.5.0",
+    "lucide-react": "^0.378.0",
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "^2",
+    "@types/react": "^18.2.66",
+    "@types/react-dom": "^18.2.22",
+    "@vitejs/plugin-react": "^4.2.1",
+    "autoprefixer": "^10.4.19",
+    "postcss": "^8.4.38",
+    "tailwindcss": "^3.4.3",
+    "typescript": "^5.2.2",
+    "vite": "^5.2.0"
+  }
+}
+
+// FILE: tsconfig.json
+{
+  "compilerOptions": {
+    "target": "ES2020",
+    "useDefineForClassFields": true,
+    "lib": ["ES2020", "DOM", "DOM.Iterable"],
+    "module": "ESNext",
+    "skipLibCheck": true,
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "resolveJsonModule": true,
+    "isolatedModules": true,
+    "noEmit": true,
+    "jsx": "react-jsx",
+    "strict": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true,
+    "noFallthroughCasesInSwitch": true
+  },
+  "include": ["src"],
+  "references": [{ "path": "./tsconfig.node.json" }]
+}
+
+// FILE: tailwind.config.js
+/** @type {import('tailwindcss').Config} */
+export default {
+  content: [
+    "./index.html",
+    "./src/**/*.{js,ts,jsx,tsx}",
+  ],
+  theme: {
+    extend: {
+      colors: {
+        base: '#1E1E2E',
+        mantle: '#181825',
+        crust: '#11111B',
+        surface0: '#313244',
+        surface1: '#45475A',
+        surface2: '#585B70',
+        overlay0: '#6C7086',
+        subtext0: '#A6ADC8',
+        text: '#CDD6F4',
+        mauve: '#CBA6F7',
+        red: '#F38BA8',
+        green: '#A6E3A1',
+        yellow: '#F9E2AF',
+        blue: '#89B4FA',
+        lavender: '#B4BEFE',
+      },
+      fontFamily: {
+        mono: ['"JetBrains Mono"', '"Fira Code"', 'monospace'],
+        sans: ['system-ui', 'sans-serif'],
+      }
+    },
+  },
+  plugins: [],
+}
+
+// FILE: vite.config.ts
+import { defineConfig } from "vite";
+import react from "@vitejs/plugin-react";
+
+export default defineConfig({
+  plugins: [react()],
+  clearScreen: false,
+  server: {
+    port: 1420,
+    strictPort: true,
+    watch: {
+      ignored: ["**/src-tauri/**"],
+    },
+  },
+});
+
+// FILE: index.html
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Terminator</title>
+    <style>
+      :root {
+        font-family: Inter, system-ui, Avenir, Helvetica, Arial, sans-serif;
+        line-height: 1.5;
+        font-weight: 400;
+        color: #CDD6F4;
+        background-color: #1E1E2E;
+        font-synthesis: none;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: antialiased;
+        -moz-osx-font-smoothing: grayscale;
+        margin: 0;
+        padding: 0;
+        height: 100vh;
+        width: 100vw;
+        overflow: hidden;
+      }
+      body, #root {
+        height: 100%;
+        width: 100%;
+        margin: 0;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+      }
+      * {
+        box-sizing: border-box;
+      }
+    </style>
+    <link rel="stylesheet" href="/node_modules/@xterm/xterm/css/xterm.css" />
+  </head>
+  <body>
+    <div id="root"></div>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
+
+// FILE: src/main.tsx
+// FILE: src/main.tsx
+import React from "react";
+import ReactDOM from "react-dom/client";
+import App from "./App";
+import "./index.css";
+
+ReactDOM.createRoot(document.getElementById("root") as HTMLElement).render(
+  <React.StrictMode>
+    <App />
+  </React.StrictMode>
+);
+
+// FILE: src/App.tsx
+// FILE: src/App.tsx
+import React from "react";
+import { TopBar } from "./components/TopBar";
+import { TileLayout } from "./components/TileLayout";
+import { SettingsModal } from "./components/SettingsModal";
+import { useAppState } from "./state/useAppState";
+import { useKeybindings } from "./hooks/useKeybindings";
+import { usePtyEvents } from "./hooks/usePtyEvents";
+
+const App: React.FC = () => {
+  const { state, dispatch } = useAppState();
+
+  useKeybindings(state, dispatch);
+  usePtyEvents(state, dispatch);
+
+  const activeWorkspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+
+  return (
+    <div className="flex flex-col w-screen h-screen bg-base overflow-hidden text-text font-sans">
+      <TopBar state={state} dispatch={dispatch} />
+      <div className="flex-1 overflow-hidden relative" id="workspace-container">
+        {activeWorkspace ? (
+          <TileLayout
+            node={activeWorkspace.root}
+            focusedPaneId={activeWorkspace.focusedPaneId}
+            workspaceId={activeWorkspace.id}
+            state={state}
+            dispatch={dispatch}
+          />
+        ) : (
+          <div className="flex items-center justify-center w-full h-full text-subtext0">
+            No active workspace. Press ⌘⇧T to create one.
+          </div>
+        )}
+      </div>
+      <SettingsModal state={state} dispatch={dispatch} />
+    </div>
+  );
+};
+
+export default App;
+
+// FILE: src/types.ts
+// FILE: src/types.ts
+export type PtyId = string;
+
+export interface PaneNode {
+  id: string;
+  ptyId: PtyId;
+  cwd: string;
+  processName: string;
+  type: "pane";
+}
+
+export type SplitDirection = "horizontal" | "vertical";
+
+export interface SplitNode {
+  id: string;
+  direction: SplitDirection;
+  ratio: number;
+  first: TileNode;
+  second: TileNode;
+  type: "split";
+}
+
+export type TileNode = PaneNode | SplitNode;
+
+export interface Workspace {
+  id: string;
+  name: string;
+  root: TileNode;
+  focusedPaneId: string;
+}
+
+export interface AppState {
+  workspaces: Workspace[];
+  activeWorkspaceId: string;
+  settings: Settings;
+  settingsOpen: boolean;
+}
+
+export interface Settings {
+  shell: string;
+  theme: string;
+  keybindings: Record<string, string>;
+}
+
+export type Action =
+  | { type: "INIT_STATE"; state: AppState }
+  | { type: "NEW_WORKSPACE" }
+  | { type: "CLOSE_WORKSPACE"; id: string }
+  | { type: "SWITCH_WORKSPACE"; id: string }
+  | { type: "SET_FOCUS"; paneId: string }
+  | { type: "SPLIT_PANE"; paneId: string; direction: SplitDirection; newPtyId: PtyId; newPaneId: string }
+  | { type: "CLOSE_PANE"; paneId: string }
+  | { type: "UPDATE_CWD"; paneId: string; cwd: string }
+  | { type: "UPDATE_PROCESS"; paneId: string; processName: string }
+  | { type: "SET_SPLIT_RATIO"; splitId: string; ratio: number }
+  | { type: "OPEN_SETTINGS" }
+  | { type: "CLOSE_SETTINGS" }
+  | { type: "SAVE_SETTINGS"; settings: Settings };
+
+// FILE: src/state/useAppState.ts
+// FILE: src/state/useAppState.ts
+import { useReducer, useEffect } from "react";
+import { AppState, Workspace, TileNode, PaneNode, Settings } from "../types";
+import { removePane, updatePaneData } from "./tileHelpers";
+import { invoke } from "@tauri-apps/api/core";
+
+const defaultSettings: Settings = {
+  shell: "/bin/zsh",
+  theme: "catppuccin-mocha",
+  keybindings: {
+    newWorkspace: "Meta+Shift+T",
+    closeWorkspace: "Meta+Shift+W",
+    newTerminal: "Meta+T",
+    closeTerminal: "Meta+W",
+    focusUp: "Meta+ArrowUp",
+    focusDown: "Meta+ArrowDown",
+    focusLeft: "Meta+ArrowLeft",
+    focusRight: "Meta+ArrowRight",
+    openSearch: "Meta+F",
+    openSettings: "Meta+Comma",
+    switchWorkspace1: "Meta+1",
+    switchWorkspace2: "Meta+2",
+    switchWorkspace3: "Meta+3",
+    switchWorkspace4: "Meta+4",
+    switchWorkspace5: "Meta+5",
+    switchWorkspace6: "Meta+6",
+    switchWorkspace7: "Meta+7",
+    switchWorkspace8: "Meta+8",
+    switchWorkspace9: "Meta+9",
+  },
+};
+
+const initialState: AppState = {
+  workspaces: [],
+  activeWorkspaceId: "",
+  settings: defaultSettings,
+  settingsOpen: false,
+};
+
+function generateId() {
+  return Math.random().toString(36).substring(2, 9);
+}
+
+export function useAppState() {
+  const [state, dispatch] = useReducer(
+    (state: AppState, action: any): AppState => {
+      switch (action.type) {
+        case "INIT_STATE":
+          return action.state;
+        case "ADD_WORKSPACE": {
+          const newWorkspace: Workspace = {
+            id: action.workspaceId,
+            name: `Workspace ${state.workspaces.length + 1}`,
+            root: {
+              type: "pane",
+              id: action.paneId,
+              ptyId: action.ptyId,
+              cwd: "~",
+              processName: "shell",
+            },
+            focusedPaneId: action.paneId,
+          };
+          return {
+            ...state,
+            workspaces: [...state.workspaces, newWorkspace],
+            activeWorkspaceId: newWorkspace.id,
+          };
+        }
+        case "CLOSE_WORKSPACE": {
+          const nextWorkspaces = state.workspaces.filter(
+            (w) => w.id !== action.id,
+          );
+          const nextActiveId =
+            state.activeWorkspaceId === action.id
+              ? nextWorkspaces[0]?.id || ""
+              : state.activeWorkspaceId;
+          return {
+            ...state,
+            workspaces: nextWorkspaces,
+            activeWorkspaceId: nextActiveId,
+          };
+        }
+        case "SWITCH_WORKSPACE":
+          return { ...state, activeWorkspaceId: action.id };
+        case "SET_FOCUS": {
+          return {
+            ...state,
+            workspaces: state.workspaces.map((w) =>
+              w.id === state.activeWorkspaceId
+                ? { ...w, focusedPaneId: action.paneId }
+                : w,
+            ),
+          };
+        }
+        case "SPLIT_PANE": {
+          const { paneId, direction, newPtyId, newPaneId, swap } = action;
+          return {
+            ...state,
+            workspaces: state.workspaces.map((w) => {
+              if (w.id !== state.activeWorkspaceId) return w;
+              const newPane: PaneNode = {
+                type: "pane",
+                id: newPaneId,
+                ptyId: newPtyId,
+                cwd: "~",
+                processName: "shell",
+              };
+              const replacePaneWithSplit = (node: TileNode): TileNode => {
+                if (node.type === "pane") {
+                  if (node.id === paneId) {
+                    return {
+                      type: "split",
+                      id: generateId(),
+                      direction,
+                      ratio: 0.5,
+                      first: swap ? newPane : node,
+                      second: swap ? node : newPane,
+                    };
+                  }
+                  return node;
+                }
+                return {
+                  ...node,
+                  first: replacePaneWithSplit(node.first),
+                  second: replacePaneWithSplit(node.second),
+                };
+              };
+              return {
+                ...w,
+                root: replacePaneWithSplit(w.root),
+                focusedPaneId: newPaneId,
+              };
+            }),
+          };
+        }
+        case "CLOSE_PANE": {
+          return {
+            ...state,
+            workspaces: state.workspaces.map((w) => {
+              if (w.id !== state.activeWorkspaceId) return w;
+              const { newRoot, focusId } = removePane(w.root, action.paneId);
+              if (!newRoot) return w; // Can trigger workspace close if implemented
+              return {
+                ...w,
+                root: newRoot,
+                focusedPaneId: focusId || w.focusedPaneId,
+              };
+            }),
+          };
+        }
+        case "UPDATE_PANE_DATA": {
+          return {
+            ...state,
+            workspaces: state.workspaces.map((w) => ({
+              ...w,
+              root: updatePaneData(w.root, action.ptyId, action.updates),
+            })),
+          };
+        }
+        case "SET_SPLIT_RATIO": {
+          const updateRatio = (node: TileNode): TileNode => {
+            if (node.type === "pane") return node;
+            if (node.id === action.splitId) {
+              return { ...node, ratio: action.ratio };
+            }
+            return {
+              ...node,
+              first: updateRatio(node.first),
+              second: updateRatio(node.second),
+            };
+          };
+          return {
+            ...state,
+            workspaces: state.workspaces.map((w) =>
+              w.id === state.activeWorkspaceId
+                ? { ...w, root: updateRatio(w.root) }
+                : w,
+            ),
+          };
+        }
+        case "OPEN_SETTINGS":
+          return { ...state, settingsOpen: true };
+        case "CLOSE_SETTINGS":
+          return { ...state, settingsOpen: false };
+        case "SAVE_SETTINGS":
+          return { ...state, settings: action.settings, settingsOpen: false };
+        default:
+          return state;
+      }
+    },
+    initialState,
+  );
+
+  useEffect(() => {
+    async function init() {
+      try {
+        const settings: Settings = await invoke("get_settings");
+        dispatch({ type: "INIT_STATE", state: { ...initialState, settings } });
+
+        const ptyId = await invoke<string>("spawn_pty", {
+          shell: settings.shell,
+          cols: 80,
+          rows: 24,
+        });
+        dispatch({
+          type: "ADD_WORKSPACE",
+          workspaceId: generateId(),
+          paneId: generateId(),
+          ptyId,
+        });
+      } catch (e) {
+        console.error("Failed to init:", e);
+      }
+    }
+    init();
+  }, []);
+
+  return { state, dispatch };
+}
+
+// FILE: src/state/tileHelpers.ts
+// FILE: src/state/tileHelpers.ts
+import { TileNode, PaneNode } from "../types";
+
+export function findPane(root: TileNode, id: string): PaneNode | null {
+  if (root.type === "pane") {
+    return root.id === id ? root : null;
+  }
+  return findPane(root.first, id) || findPane(root.second, id);
+}
+
+export function replaceNode(
+  root: TileNode,
+  targetId: string,
+  newNode: TileNode,
+): TileNode {
+  if (root.id === targetId) return newNode;
+  if (root.type === "pane") return root;
+
+  return {
+    ...root,
+    first: replaceNode(root.first, targetId, newNode),
+    second: replaceNode(root.second, targetId, newNode),
+  };
+}
+
+export function removePane(
+  root: TileNode,
+  targetId: string,
+): { newRoot: TileNode | null; focusId: string | null } {
+  if (root.type === "pane") {
+    if (root.id === targetId) return { newRoot: null, focusId: null };
+    return { newRoot: root, focusId: root.id };
+  }
+
+  if (root.first.id === targetId) {
+    const focusId = getFirstPane(root.second).id;
+    return { newRoot: root.second, focusId };
+  }
+  if (root.second.id === targetId) {
+    const focusId = getFirstPane(root.first).id;
+    return { newRoot: root.first, focusId };
+  }
+
+  const leftResult = removePane(root.first, targetId);
+  if (leftResult.newRoot !== root.first) {
+    return {
+      newRoot: { ...root, first: leftResult.newRoot! },
+      focusId: leftResult.focusId,
+    };
+  }
+
+  const rightResult = removePane(root.second, targetId);
+  if (rightResult.newRoot !== root.second) {
+    return {
+      newRoot: { ...root, second: rightResult.newRoot! },
+      focusId: rightResult.focusId,
+    };
+  }
+
+  return { newRoot: root, focusId: null };
+}
+
+export function getFirstPane(root: TileNode): PaneNode {
+  if (root.type === "pane") return root;
+  return getFirstPane(root.first);
+}
+
+export function updatePaneData(
+  root: TileNode,
+  ptyId: string,
+  updates: Partial<PaneNode>,
+): TileNode {
+  if (root.type === "pane") {
+    if (root.ptyId === ptyId) {
+      return { ...root, ...updates };
+    }
+    return root;
+  }
+  return {
+    ...root,
+    first: updatePaneData(root.first, ptyId, updates),
+    second: updatePaneData(root.second, ptyId, updates),
+  };
+}
+
+// FILE: src/hooks/useKeybindings.ts
+// FILE: src/hooks/useKeybindings.ts
+import { useEffect } from "react";
+import { AppState, PaneNode, TileNode } from "../types";
+import { invoke } from "@tauri-apps/api/core";
+import { ask } from "@tauri-apps/plugin-dialog";
+import { triggerDwindleSplit } from "../components/TileLayout";
+
+function generateId() {
+  return Math.random().toString(36).substring(2, 9);
+}
+
+function findPaneById(root: TileNode, paneId: string): PaneNode | null {
+  if (root.type === "pane") return root.id === paneId ? root : null;
+  return findPaneById(root.first, paneId) || findPaneById(root.second, paneId);
+}
+
+function getAllPanesAndRects(): { paneId: string; rect: DOMRect }[] {
+  const panes = Array.from(document.querySelectorAll("[data-pane-id]"));
+  return panes.map((p) => ({
+    paneId: p.getAttribute("data-pane-id")!,
+    rect: p.getBoundingClientRect(),
+  }));
+}
+
+export function useKeybindings(state: AppState, dispatch: React.Dispatch<any>) {
+  useEffect(() => {
+    const handleKeyDown = async (e: KeyboardEvent) => {
+      if (state.settingsOpen) return;
+
+      const meta = e.metaKey;
+      const shift = e.shiftKey;
+      const key = e.key;
+
+      const bindingCombo = [
+        meta ? "Meta" : "",
+        shift ? "Shift" : "",
+        key === "ArrowUp"
+          ? "ArrowUp"
+          : key === "ArrowDown"
+            ? "ArrowDown"
+            : key === "ArrowLeft"
+              ? "ArrowLeft"
+              : key === "ArrowRight"
+                ? "ArrowRight"
+                : key.length === 1
+                  ? key.toUpperCase()
+                  : "",
+      ]
+        .filter(Boolean)
+        .join("+");
+
+      const { keybindings } = state.settings;
+
+      if (bindingCombo === keybindings.newWorkspace) {
+        const ptyId = await invoke<string>("spawn_pty", {
+          shell: state.settings.shell,
+          cols: 80,
+          rows: 24,
+        });
+        dispatch({
+          type: "ADD_WORKSPACE",
+          workspaceId: generateId(),
+          paneId: generateId(),
+          ptyId,
+        });
+      } else if (bindingCombo === keybindings.closeWorkspace) {
+        if (state.activeWorkspaceId) {
+          dispatch({ type: "CLOSE_WORKSPACE", id: state.activeWorkspaceId });
+        }
+      } else if (bindingCombo === keybindings.newTerminal) {
+        triggerDwindleSplit(state, dispatch, async (shell, cols, rows) => {
+          return await invoke<string>("spawn_pty", { shell, cols, rows });
+        });
+      } else if (bindingCombo === keybindings.closeTerminal) {
+        const activeWorkspace = state.workspaces.find(
+          (w) => w.id === state.activeWorkspaceId,
+        );
+        if (activeWorkspace) {
+          const pane = findPaneById(
+            activeWorkspace.root,
+            activeWorkspace.focusedPaneId,
+          );
+          if (pane) {
+            const processName = await invoke<string>("get_process_name", {
+              id: pane.ptyId,
+            });
+            const shellNames = ["zsh", "bash", "fish", "sh"];
+            if (
+              processName &&
+              !shellNames.includes(processName.toLowerCase())
+            ) {
+              const confirmClose = await ask(
+                `The process «${processName}» is still running. Close anyway?`,
+                {
+                  title: "Close pane?",
+                  kind: "warning",
+                },
+              );
+              if (!confirmClose) return;
+            }
+            dispatch({
+              type: "CLOSE_PANE",
+              paneId: activeWorkspace.focusedPaneId,
+            });
+          }
+        }
+      } else if (bindingCombo === keybindings.openSettings) {
+        dispatch({ type: "OPEN_SETTINGS" });
+      } else if (bindingCombo === keybindings.openSearch) {
+        window.dispatchEvent(new CustomEvent(`open-search`));
+      } else if (
+        bindingCombo.startsWith("Meta+") &&
+        bindingCombo.length === 6
+      ) {
+        const num = parseInt(bindingCombo[5]);
+        if (num >= 1 && num <= 9 && num <= state.workspaces.length) {
+          dispatch({
+            type: "SWITCH_WORKSPACE",
+            id: state.workspaces[num - 1].id,
+          });
+        }
+      } else if (
+        bindingCombo === keybindings.focusUp ||
+        bindingCombo === keybindings.focusDown ||
+        bindingCombo === keybindings.focusLeft ||
+        bindingCombo === keybindings.focusRight
+      ) {
+        const activeWorkspace = state.workspaces.find(
+          (w) => w.id === state.activeWorkspaceId,
+        );
+        if (!activeWorkspace) return;
+        const currentPaneId = activeWorkspace.focusedPaneId;
+        const panes = getAllPanesAndRects();
+        const currentPane = panes.find((p) => p.paneId === currentPaneId);
+        if (!currentPane) return;
+        const { rect } = currentPane;
+
+        let bestPaneId: string | null = null;
+        let minDistance = Infinity;
+
+        panes.forEach((p) => {
+          if (p.paneId === currentPaneId) return;
+          const pr = p.rect;
+          let valid = false;
+          let dist = Infinity;
+
+          if (bindingCombo === keybindings.focusRight) {
+            valid = pr.left >= rect.right;
+            dist = pr.left - rect.right + Math.abs(pr.top - rect.top);
+          } else if (bindingCombo === keybindings.focusLeft) {
+            valid = pr.right <= rect.left;
+            dist = rect.left - pr.right + Math.abs(pr.top - rect.top);
+          } else if (bindingCombo === keybindings.focusDown) {
+            valid = pr.top >= rect.bottom;
+            dist = pr.top - rect.bottom + Math.abs(pr.left - rect.left);
+          } else if (bindingCombo === keybindings.focusUp) {
+            valid = pr.bottom <= rect.top;
+            dist = rect.top - pr.bottom + Math.abs(pr.left - rect.left);
+          }
+
+          if (valid && dist < minDistance) {
+            minDistance = dist;
+            bestPaneId = p.paneId;
+          }
+        });
+
+        if (bestPaneId) {
+          dispatch({ type: "SET_FOCUS", paneId: bestPaneId });
+        }
+      }
+    };
+
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [state, dispatch]);
+}
+
+// FILE: src/hooks/usePtyEvents.ts
+// FILE: src/hooks/usePtyEvents.ts
+import { useEffect } from "react";
+import { listen } from "@tauri-apps/api/event";
+import { AppState } from "../types";
+
+export function usePtyEvents(state: AppState, dispatch: React.Dispatch<any>) {
+  useEffect(() => {
+    let unlistenExit: () => void;
+    let cwdInterval: ReturnType<typeof setInterval>;
+
+    async function setup() {
+      unlistenExit = await listen<{ id: string; code: number }>(
+        "pty-exit",
+        (event) => {
+          for (const workspace of state.workspaces) {
+            const findPaneIdByPty = (node: any): string | null => {
+              if (node.type === "pane" && node.ptyId === event.payload.id)
+                return node.id;
+              if (node.type === "split") {
+                return (
+                  findPaneIdByPty(node.first) || findPaneIdByPty(node.second)
+                );
+              }
+              return null;
+            };
+            const paneId = findPaneIdByPty(workspace.root);
+            if (paneId) {
+              dispatch({ type: "CLOSE_PANE", paneId });
+              break;
+            }
+          }
+        },
+      );
+
+      cwdInterval = setInterval(async () => {}, 1000);
+    }
+    setup();
+
+    return () => {
+      if (unlistenExit) unlistenExit();
+      if (cwdInterval) clearInterval(cwdInterval);
+    };
+  }, [state.workspaces, dispatch]);
+}
+
+// FILE: src/components/TopBar.tsx
+// FILE: src/components/TopBar.tsx
+import React from "react";
+import { Plus, Settings } from "lucide-react";
+import { AppState } from "../types";
+import { invoke } from "@tauri-apps/api/core";
+
+interface TopBarProps {
+  state: AppState;
+  dispatch: React.Dispatch<any>;
+}
+
+function generateId() {
+  return Math.random().toString(36).substring(2, 9);
+}
+
+export const TopBar: React.FC<TopBarProps> = ({ state, dispatch }) => {
+  const handleNewWorkspace = async () => {
+    const ptyId = await invoke<string>("spawn_pty", {
+      shell: state.settings.shell,
+      cols: 80,
+      rows: 24,
+    });
+    dispatch({
+      type: "ADD_WORKSPACE",
+      workspaceId: generateId(),
+      paneId: generateId(),
+      ptyId,
+    });
+  };
+
+  const handleOpenSettings = () => {
+    dispatch({ type: "OPEN_SETTINGS" });
+  };
+
+  return (
+    <div className="flex items-center h-[36px] bg-base text-text select-none">
+      <div className="flex-1 flex overflow-x-auto items-center px-2 space-x-1">
+        {state.workspaces.map((w) => (
+          <div
+            key={w.id}
+            onClick={() => dispatch({ type: "SWITCH_WORKSPACE", id: w.id })}
+            className={`group relative flex items-center h-7 px-3 rounded-md cursor-pointer text-sm font-sans ${
+              state.activeWorkspaceId === w.id
+                ? "bg-surface1 text-text"
+                : "text-subtext0 hover:bg-surface0"
+            }`}
+          >
+            <span>{w.name}</span>
+            <button
+              className="ml-2 w-4 h-4 rounded hover:bg-red hover:text-crust opacity-0 group-hover:opacity-100 flex items-center justify-center transition-opacity"
+              onClick={(e) => {
+                e.stopPropagation();
+                dispatch({ type: "CLOSE_WORKSPACE", id: w.id });
+              }}
+            >
+              ×
+            </button>
+          </div>
+        ))}
+        <button
+          onClick={handleNewWorkspace}
+          className="w-7 h-7 flex items-center justify-center rounded-md text-subtext0 hover:bg-surface0"
+        >
+          <Plus size={16} />
+        </button>
+      </div>
+      <div className="px-3 flex items-center">
+        <button
+          onClick={handleOpenSettings}
+          className="w-7 h-7 flex items-center justify-center rounded-md text-subtext0 hover:text-text hover:bg-surface0"
+        >
+          <Settings size={16} />
+        </button>
+      </div>
+    </div>
+  );
+};
+
+// FILE: src/components/TileLayout.tsx
+// FILE: src/components/TileLayout.tsx
+import React, { useRef } from "react";
+import { TileNode, AppState, SplitDirection } from "../types";
+import { TerminalPane } from "./TerminalPane";
+
+interface TileLayoutProps {
+  node: TileNode;
+  focusedPaneId: string;
+  workspaceId: string;
+  state: AppState;
+  dispatch: React.Dispatch<any>;
+}
+
+// Global mouse tracker for split logic
+let lastMousePos = { x: 0, y: 0 };
+window.addEventListener("mousemove", (e) => {
+  lastMousePos = { x: e.clientX, y: e.clientY };
+});
+
+function generateId() {
+  return Math.random().toString(36).substring(2, 9);
+}
+
+export const TileLayout: React.FC<TileLayoutProps> = ({
+  node,
+  focusedPaneId,
+  workspaceId,
+  state,
+  dispatch,
+}) => {
+  const handleSplit = () => {};
+
+  if (node.type === "pane") {
+    return (
+      <TerminalPane
+        paneId={node.id}
+        ptyId={node.ptyId}
+        cwd={node.cwd}
+        processName={node.processName}
+        isFocused={node.id === focusedPaneId}
+        onFocus={() => dispatch({ type: "SET_FOCUS", paneId: node.id })}
+        onSplit={handleSplit}
+      />
+    );
+  }
+
+  return (
+    <SplitContainer
+      node={node}
+      focusedPaneId={focusedPaneId}
+      workspaceId={workspaceId}
+      state={state}
+      dispatch={dispatch}
+    />
+  );
+};
+
+interface SplitContainerProps {
+  node: TileNode & { type: "split" };
+  focusedPaneId: string;
+  workspaceId: string;
+  state: AppState;
+  dispatch: React.Dispatch<any>;
+}
+
+const SplitContainer: React.FC<SplitContainerProps> = ({
+  node,
+  focusedPaneId,
+  workspaceId,
+  state,
+  dispatch,
+}) => {
+  const containerRef = useRef<HTMLDivElement>(null);
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.preventDefault();
+
+    const handleMouseMove = (moveEvent: MouseEvent) => {
+      if (!containerRef.current) return;
+      const rect = containerRef.current.getBoundingClientRect();
+      let newRatio = node.ratio;
+
+      if (node.direction === "horizontal") {
+        newRatio = (moveEvent.clientX - rect.left) / rect.width;
+      } else {
+        newRatio = (moveEvent.clientY - rect.top) / rect.height;
+      }
+
+      newRatio = Math.max(0.1, Math.min(0.9, newRatio));
+      dispatch({ type: "SET_SPLIT_RATIO", splitId: node.id, ratio: newRatio });
+    };
+
+    const handleMouseUp = () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+
+    window.addEventListener("mousemove", handleMouseMove);
+    window.addEventListener("mouseup", handleMouseUp);
+  };
+
+  const isHorizontal = node.direction === "horizontal";
+  const firstBasis = `${node.ratio * 100}%`;
+  const secondBasis = `${(1 - node.ratio) * 100}%`;
+
+  return (
+    <div
+      ref={containerRef}
+      className={`flex w-full h-full ${isHorizontal ? "flex-row" : "flex-col"} overflow-hidden`}
+    >
+      <div
+        style={{
+          flexBasis: firstBasis,
+          flexGrow: 0,
+          flexShrink: 0,
+          overflow: "hidden",
+        }}
+      >
+        <TileLayout
+          node={node.first}
+          focusedPaneId={focusedPaneId}
+          workspaceId={workspaceId}
+          state={state}
+          dispatch={dispatch}
+        />
+      </div>
+      <div
+        className={`${isHorizontal ? "w-1 h-full cursor-col-resize" : "h-1 w-full cursor-row-resize"} bg-surface1 hover:bg-surface2 transition-colors z-10 flex-shrink-0`}
+        onMouseDown={handleMouseDown}
+      />
+      <div
+        style={{
+          flexBasis: secondBasis,
+          flexGrow: 1,
+          flexShrink: 1,
+          overflow: "hidden",
+        }}
+      >
+        <TileLayout
+          node={node.second}
+          focusedPaneId={focusedPaneId}
+          workspaceId={workspaceId}
+          state={state}
+          dispatch={dispatch}
+        />
+      </div>
+    </div>
+  );
+};
+
+export function triggerDwindleSplit(
+  state: AppState,
+  dispatch: React.Dispatch<any>,
+  spawnPty: (shell: string, cols: number, rows: number) => Promise<string>,
+) {
+  const activeWorkspace = state.workspaces.find(
+    (w) => w.id === state.activeWorkspaceId,
+  );
+  if (!activeWorkspace) return;
+
+  const currentPaneId = activeWorkspace.focusedPaneId;
+  const paneEl = document.querySelector(`[data-pane-id="${currentPaneId}"]`);
+  if (!paneEl) return;
+
+  const rect = paneEl.getBoundingClientRect();
+  const relX = (lastMousePos.x - rect.left) / rect.width;
+  const relY = (lastMousePos.y - rect.top) / rect.height;
+
+  const distLeft = relX;
+  const distRight = 1 - relX;
+  const distTop = relY;
+  const distBottom = 1 - relY;
+
+  let direction: SplitDirection = "horizontal";
+  let swap = false;
+
+  const minVert = Math.min(distLeft, distRight);
+  const minHoriz = Math.min(distTop, distBottom);
+
+  if (minVert < minHoriz) {
+    direction = "horizontal";
+    if (distLeft < distRight) swap = true;
+  } else {
+    direction = "vertical";
+    if (distTop < distBottom) swap = true;
+  }
+
+  spawnPty(state.settings.shell, 80, 24).then((ptyId) => {
+    dispatch({
+      type: "SPLIT_PANE",
+      paneId: currentPaneId,
+      direction,
+      newPtyId: ptyId,
+      newPaneId: generateId(),
+      swap,
+    });
+  });
+}
+
+// FILE: src/components/TerminalPane.tsx
+// FILE: src/components/TerminalPane.tsx
+import React, { useEffect, useRef, useState } from "react";
+import { Terminal } from "@xterm/xterm";
+import { FitAddon } from "@xterm/addon-fit";
+import { WebglAddon } from "@xterm/addon-webgl";
+import { SearchAddon } from "@xterm/addon-search";
+import { listen } from "@tauri-apps/api/event";
+import { invoke } from "@tauri-apps/api/core";
+import { PaneStatusBar } from "./PaneStatusBar";
+import { SplitDirection } from "../types";
+
+interface TerminalPaneProps {
+  paneId: string;
+  ptyId: string;
+  cwd: string;
+  processName: string;
+  isFocused: boolean;
+  onFocus: () => void;
+  onSplit: (direction: SplitDirection) => void;
+}
+
+export const TerminalPane: React.FC<TerminalPaneProps> = ({
+  paneId,
+  ptyId,
+  cwd,
+  processName,
+  isFocused,
+  onFocus,
+}) => {
+  const terminalRef = useRef<HTMLDivElement>(null);
+  const termInstance = useRef<Terminal | null>(null);
+  const fitAddon = useRef<FitAddon | null>(null);
+  const searchAddon = useRef<SearchAddon | null>(null);
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [internalCwd, setInternalCwd] = useState(cwd);
+  const [internalProc, setInternalProc] = useState(processName);
+  const [showSearch, setShowSearch] = useState(false);
+
+  useEffect(() => {
+    if (!terminalRef.current) return;
+
+    const term = new Terminal({
+      fontFamily: '"JetBrains Mono", "Fira Code", monospace',
+      fontSize: 14,
+      theme: {
+        background: "#1E1E2E",
+        foreground: "#CDD6F4",
+        cursor: "#CDD6F4",
+        black: "#45475A",
+        red: "#F38BA8",
+        green: "#A6E3A1",
+        yellow: "#F9E2AF",
+        blue: "#89B4FA",
+        magenta: "#CBA6F7",
+        cyan: "#94E2D5",
+        white: "#BAC2DE",
+        brightBlack: "#585B70",
+        brightRed: "#F38BA8",
+        brightGreen: "#A6E3A1",
+        brightYellow: "#F9E2AF",
+        brightBlue: "#89B4FA",
+        brightMagenta: "#CBA6F7",
+        brightCyan: "#94E2D5",
+        brightWhite: "#A6ADC8",
+      },
+    });
+
+    termInstance.current = term;
+    fitAddon.current = new FitAddon();
+    searchAddon.current = new SearchAddon();
+
+    term.loadAddon(fitAddon.current);
+    term.loadAddon(searchAddon.current);
+
+    term.open(terminalRef.current);
+
+    try {
+      const webgl = new WebglAddon();
+      term.loadAddon(webgl);
+    } catch (e) {
+      console.warn("WebGL addon failed to load, using canvas fallback", e);
+    }
+
+    term.onData((data) => {
+      invoke("write_pty", {
+        id: ptyId,
+        data: Array.from(new TextEncoder().encode(data)),
+      });
+    });
+
+    const resizeObserver = new ResizeObserver(() => {
+      if (fitAddon.current) {
+        fitAddon.current.fit();
+        if (term.cols && term.rows) {
+          invoke("resize_pty", { id: ptyId, cols: term.cols, rows: term.rows });
+        }
+      }
+    });
+
+    resizeObserver.observe(terminalRef.current);
+    fitAddon.current.fit();
+    if (term.cols && term.rows) {
+      invoke("resize_pty", { id: ptyId, cols: term.cols, rows: term.rows });
+    }
+
+    let unlistenData: () => void;
+    listen<{ id: string; data: number[] }>("pty-data", (event) => {
+      if (event.payload.id === ptyId) {
+        const str = new TextDecoder().decode(
+          new Uint8Array(event.payload.data),
+        );
+        term.write(str);
+      }
+    }).then((unlisten) => {
+      unlistenData = unlisten;
+    });
+
+    const interval = setInterval(async () => {
+      try {
+        const c = await invoke<string>("get_cwd", { id: ptyId });
+        if (c) setInternalCwd(c);
+        const p = await invoke<string>("get_process_name", { id: ptyId });
+        if (p) setInternalProc(p);
+      } catch (e) {}
+    }, 1000);
+
+    return () => {
+      term.dispose();
+      resizeObserver.disconnect();
+      if (unlistenData) unlistenData();
+      clearInterval(interval);
+      invoke("kill_pty", { id: ptyId }).catch(() => {});
+    };
+  }, [ptyId]);
+
+  useEffect(() => {
+    const handleOpenSearch = () => {
+      if (isFocused) {
+        setShowSearch((prev) => !prev);
+      }
+    };
+    window.addEventListener("open-search", handleOpenSearch);
+    return () => window.removeEventListener("open-search", handleOpenSearch);
+  }, [isFocused]);
+
+  const handleContainerClick = () => {
+    onFocus();
+  };
+
+  return (
+    <div
+      ref={containerRef}
+      onClick={handleContainerClick}
+      data-pane-id={paneId}
+      className={`flex flex-col w-full h-full border ${isFocused ? "border-mauve" : "border-transparent"} box-border overflow-hidden bg-base relative`}
+    >
+      {showSearch && (
+        <div className="absolute top-0 right-0 p-2 bg-mantle border-b border-l border-surface1 z-10 flex space-x-2">
+          <input
+            type="text"
+            className="bg-crust text-text p-1 rounded outline-none border border-surface1"
+            placeholder="Search..."
+            onChange={(e) => searchAddon.current?.findNext(e.target.value)}
+          />
+          <button
+            onClick={() => setShowSearch(false)}
+            className="text-text px-2"
+          >
+            X
+          </button>
+        </div>
+      )}
+      <div className="flex-1 overflow-hidden" ref={terminalRef} />
+      <PaneStatusBar cwd={internalCwd} processName={internalProc} />
+    </div>
+  );
+};
+
+// FILE: src/components/PaneStatusBar.tsx
+// FILE: src/components/PaneStatusBar.tsx
+import React from "react";
+import { Folder } from "lucide-react";
+
+interface PaneStatusBarProps {
+  cwd: string;
+  processName: string;
+}
+
+export const PaneStatusBar: React.FC<PaneStatusBarProps> = ({
+  cwd,
+  processName,
+}) => {
+  return (
+    <div className="h-[24px] bg-crust text-subtext0 text-[11px] font-mono flex items-center justify-between px-2 select-none">
+      <div className="flex items-center space-x-2 overflow-hidden whitespace-nowrap">
+        <Folder size={12} className="text-blue" />
+        <span className="truncate">{cwd}</span>
+      </div>
+      <div className="flex items-center space-x-2 shrink-0">
+        <span className="px-1.5 py-0.5 rounded bg-surface0 text-text">
+          {processName}
+        </span>
+      </div>
+    </div>
+  );
+};
+
+// FILE: src/components/SettingsModal.tsx
+// FILE: src/components/SettingsModal.tsx
+import React, { useState, useEffect } from "react";
+import { AppState, Settings } from "../types";
+import { invoke } from "@tauri-apps/api/core";
+
+interface SettingsModalProps {
+  state: AppState;
+  dispatch: React.Dispatch<any>;
+}
+
+export const SettingsModal: React.FC<SettingsModalProps> = ({
+  state,
+  dispatch,
+}) => {
+  const [localSettings, setLocalSettings] = useState<Settings>(state.settings);
+  const [recordingKey, setRecordingKey] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (state.settingsOpen) {
+      setLocalSettings(state.settings);
+    }
+  }, [state.settingsOpen, state.settings]);
+
+  useEffect(() => {
+    if (!recordingKey) return;
+
+    const handleKeyDown = (e: KeyboardEvent) => {
+      e.preventDefault();
+      e.stopPropagation();
+
+      const meta = e.metaKey;
+      const shift = e.shiftKey;
+      const key = e.key;
+
+      if (key === "Escape") {
+        setRecordingKey(null);
+        return;
+      }
+
+      if (["Meta", "Shift", "Control", "Alt"].includes(key)) return;
+
+      const bindingCombo = [
+        meta ? "Meta" : "",
+        shift ? "Shift" : "",
+        key === "ArrowUp"
+          ? "ArrowUp"
+          : key === "ArrowDown"
+            ? "ArrowDown"
+            : key === "ArrowLeft"
+              ? "ArrowLeft"
+              : key === "ArrowRight"
+                ? "ArrowRight"
+                : key.length === 1
+                  ? key.toUpperCase()
+                  : "",
+      ]
+        .filter(Boolean)
+        .join("+");
+
+      if (bindingCombo) {
+        setLocalSettings((prev) => ({
+          ...prev,
+          keybindings: { ...prev.keybindings, [recordingKey]: bindingCombo },
+        }));
+      }
+      setRecordingKey(null);
+    };
+
+    window.addEventListener("keydown", handleKeyDown, true);
+    return () => window.removeEventListener("keydown", handleKeyDown, true);
+  }, [recordingKey]);
+
+  if (!state.settingsOpen) return null;
+
+  const handleSave = async () => {
+    await invoke("save_settings", { settings: localSettings });
+    dispatch({ type: "SAVE_SETTINGS", settings: localSettings });
+  };
+
+  const handleCancel = () => {
+    dispatch({ type: "CLOSE_SETTINGS" });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center font-sans">
+      <div className="bg-base w-[600px] max-h-[80vh] rounded-xl shadow-2xl flex flex-col overflow-hidden border border-surface1">
+        <div className="p-4 border-b border-surface1 text-text font-bold text-lg">
+          Settings
+        </div>
+        <div className="flex-1 overflow-y-auto p-4 space-y-6">
+          <section>
+            <h3 className="text-subtext0 mb-2 font-semibold">Shell</h3>
+            <input
+              type="text"
+              value={localSettings.shell}
+              onChange={(e) =>
+                setLocalSettings({ ...localSettings, shell: e.target.value })
+              }
+              className="w-full bg-mantle text-text border border-surface1 rounded p-2 focus:border-mauve outline-none"
+            />
+          </section>
+
+          <section>
+            <h3 className="text-subtext0 mb-2 font-semibold">Theme</h3>
+            <select
+              value={localSettings.theme}
+              onChange={(e) =>
+                setLocalSettings({ ...localSettings, theme: e.target.value })
+              }
+              className="w-full bg-mantle text-text border border-surface1 rounded p-2 focus:border-mauve outline-none"
+            >
+              <option value="catppuccin-mocha">Catppuccin Mocha</option>
+              <option value="tokyo-night" disabled>
+                Tokyo Night (coming soon)
+              </option>
+              <option value="nord" disabled>
+                Nord (coming soon)
+              </option>
+            </select>
+          </section>
+
+          <section>
+            <h3 className="text-subtext0 mb-2 font-semibold">Keybindings</h3>
+            <div className="space-y-2">
+              {Object.entries(localSettings.keybindings).map(
+                ([action, combo]) => (
+                  <div
+                    key={action}
+                    className="flex items-center justify-between bg-mantle p-2 rounded border border-surface0"
+                  >
+                    <span className="text-text capitalize">
+                      {action.replace(/([A-Z])/g, " $1").trim()}
+                    </span>
+                    <button
+                      onClick={() => setRecordingKey(action)}
+                      className={`px-3 py-1 rounded text-sm font-mono ${recordingKey === action ? "bg-mauve text-base animate-pulse" : "bg-surface1 text-text hover:bg-surface2"}`}
+                    >
+                      {recordingKey === action
+                        ? "Press any key…"
+                        : combo
+                            .replace("Meta", "⌘")
+                            .replace("Shift", "⇧")
+                            .replace("ArrowUp", "↑")
+                            .replace("ArrowDown", "↓")
+                            .replace("ArrowLeft", "←")
+                            .replace("ArrowRight", "→")}
+                    </button>
+                  </div>
+                ),
+              )}
+            </div>
+          </section>
+        </div>
+        <div className="p-4 border-t border-surface1 flex justify-end space-x-2 bg-crust">
+          <button
+            onClick={handleCancel}
+            className="px-4 py-2 rounded text-text hover:bg-surface0 transition-colors"
+          >
+            Cancel
+          </button>
+          <button
+            onClick={handleSave}
+            className="px-4 py-2 rounded bg-mauve text-crust font-semibold hover:opacity-90 transition-opacity"
+          >
+            Save
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+};
+
+HOW TO RUN
+1. git clone <repo_url> terminator
+2. cd terminator
+3. npm install
+4. npm run build
+5. npm run tauri dev
