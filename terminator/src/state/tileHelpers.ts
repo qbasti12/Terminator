@@ -1,3 +1,4 @@
+import { AppState } from "../types";
 // FILE: src/state/tileHelpers.ts
 import { TileNode, PaneNode } from "../types";
 
@@ -81,4 +82,73 @@ export function updatePaneData(
     first: updatePaneData(root.first, ptyId, updates),
     second: updatePaneData(root.second, ptyId, updates),
   };
+}
+
+export interface PaneSnapshot {
+  type: "pane";
+  id: string;
+  cwd: string;
+}
+
+export interface SplitSnapshot {
+  type: "split";
+  id: string;
+  direction: "horizontal" | "vertical";
+  ratio: number;
+  first: TileSnapshot;
+  second: TileSnapshot;
+}
+
+export type TileSnapshot = PaneSnapshot | SplitSnapshot;
+
+export interface WorkspaceSnapshot {
+  id: string;
+  name: string;
+  root: TileSnapshot;
+  focusedPaneId: string;
+}
+
+export interface SessionSnapshot {
+  workspaces: WorkspaceSnapshot[];
+  activeWorkspaceId: string;
+}
+
+function buildTileSnapshot(node: TileNode): TileSnapshot {
+  if (node.type === "pane") {
+    return {
+      type: "pane",
+      id: node.id,
+      cwd: node.cwd,
+    };
+  }
+  return {
+    type: "split",
+    id: node.id,
+    direction: node.direction,
+    ratio: node.ratio,
+    first: buildTileSnapshot(node.first),
+    second: buildTileSnapshot(node.second),
+  };
+}
+
+export function buildSnapshot(state: AppState): SessionSnapshot {
+  return {
+    workspaces: state.workspaces.map((w) => ({
+      id: w.id,
+      name: w.name,
+      root: buildTileSnapshot(w.root),
+      focusedPaneId: w.focusedPaneId,
+    })),
+    activeWorkspaceId: state.activeWorkspaceId,
+  };
+}
+
+export function collectPaneSnapshots(root: TileSnapshot): PaneSnapshot[] {
+  if (root.type === "pane") {
+    return [root];
+  }
+  return [
+    ...collectPaneSnapshots(root.first),
+    ...collectPaneSnapshots(root.second),
+  ];
 }

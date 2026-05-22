@@ -6,14 +6,18 @@ import { SettingsModal } from "./components/SettingsModal";
 import { useAppState } from "./state/useAppState";
 import { useKeybindings } from "./hooks/useKeybindings";
 import { usePtyEvents } from "./hooks/usePtyEvents";
+import { useSession } from "./hooks/useSession";
 
 const App: React.FC = () => {
   const { state, dispatch } = useAppState();
 
+  useSession(state, dispatch);
   useKeybindings(state, dispatch);
   usePtyEvents(state, dispatch);
 
-  const activeWorkspace = state.workspaces.find(w => w.id === state.activeWorkspaceId);
+  const activeWorkspace = state.workspaces.find(
+    (w) => w.id === state.activeWorkspaceId,
+  );
 
   return (
     <div className="flex flex-col w-screen h-screen bg-base overflow-hidden text-text font-sans">

@@ -1,7 +1,12 @@
 // FILE: src/state/useAppState.ts
 import { useReducer, useEffect } from "react";
 import { AppState, Workspace, TileNode, PaneNode, Settings } from "../types";
-import { removePane, updatePaneData } from "./tileHelpers";
+import {
+  removePane,
+  updatePaneData,
+  SessionSnapshot,
+  TileSnapshot,
+} from "./tileHelpers";
 import { invoke } from "@tauri-apps/api/core";
 
 const defaultSettings: Settings = {
@@ -41,12 +46,69 @@ function generateId() {
   return Math.random().toString(36).substring(2, 9);
 }
 
+function restoreTileSnapshot(snapshot: TileSnapshot): TileNode {
+  if (snapshot.type === "pane") {
+    return {
+      type: "pane",
+      id: snapshot.id,
+      ptyId: "", // will be set later
+      cwd: snapshot.cwd,
+      processName: "shell",
+    };
+  }
+  return {
+    type: "split",
+    id: snapshot.id,
+    direction: snapshot.direction,
+    ratio: snapshot.ratio,
+    first: restoreTileSnapshot(snapshot.first),
+    second: restoreTileSnapshot(snapshot.second),
+  };
+}
+
 export function useAppState() {
   const [state, dispatch] = useReducer(
     (state: AppState, action: any): AppState => {
       switch (action.type) {
         case "INIT_STATE":
           return action.state;
+        case "RESTORE_SESSION": {
+          const snapshot: SessionSnapshot = action.payload;
+          const workspaces: Workspace[] = snapshot.workspaces.map((w) => ({
+            id: w.id,
+            name: w.name,
+            root: restoreTileSnapshot(w.root),
+            focusedPaneId: w.focusedPaneId,
+          }));
+          return {
+            ...state,
+            workspaces,
+            activeWorkspaceId: snapshot.activeWorkspaceId,
+          };
+        }
+        case "SET_PTY_ID": {
+          const { paneId, ptyId } = action;
+          const updatePtyId = (node: TileNode): TileNode => {
+            if (node.type === "pane") {
+              if (node.id === paneId) {
+                return { ...node, ptyId };
+              }
+              return node;
+            }
+            return {
+              ...node,
+              first: updatePtyId(node.first),
+              second: updatePtyId(node.second),
+            };
+          };
+          return {
+            ...state,
+            workspaces: state.workspaces.map((w) => ({
+              ...w,
+              root: updatePtyId(w.root),
+            })),
+          };
+        }
         case "ADD_WORKSPACE": {
           const newWorkspace: Workspace = {
             id: action.workspaceId,
@@ -196,20 +258,8 @@ export function useAppState() {
       try {
         const settings: Settings = await invoke("get_settings");
         dispatch({ type: "INIT_STATE", state: { ...initialState, settings } });
-
-        const ptyId = await invoke<string>("spawn_pty", {
-          shell: settings.shell,
-          cols: 80,
-          rows: 24,
-        });
-        dispatch({
-          type: "ADD_WORKSPACE",
-          workspaceId: generateId(),
-          paneId: generateId(),
-          ptyId,
-        });
       } catch (e) {
-        console.error("Failed to init:", e);
+        console.error("Failed to init settings:", e);
       }
     }
     init();
