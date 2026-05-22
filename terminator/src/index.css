@@ -1,0 +1,13 @@
+/* FILE: src/index.css */
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-base text-text;
+    margin: 0;
+    padding: 0;
+    overflow: hidden;
+  }
+}
