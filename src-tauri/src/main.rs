@@ -5,6 +5,7 @@
 )]
 
 mod pty_manager;
+mod session;
 mod settings;
 
 fn main() {
@@ -20,6 +21,10 @@ fn main() {
             pty_manager::get_process_name,
             settings::get_settings,
             settings::save_settings,
+            settings::get_available_shells,
+            session::save_session,
+            session::load_session,
+            session::clear_session,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

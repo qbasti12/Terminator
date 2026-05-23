@@ -82,3 +82,43 @@ export function updatePaneData(
     second: updatePaneData(root.second, ptyId, updates),
   };
 }
+
+export function buildSnapshot(state: import("../types").AppState) {
+  const buildTileSnapshot = (node: TileNode): any => {
+    if (node.type === "pane") {
+      return {
+        type: "pane",
+        id: node.id,
+        cwd: node.cwd,
+      };
+    }
+    return {
+      type: "split",
+      id: node.id,
+      direction: node.direction,
+      ratio: node.ratio,
+      first: buildTileSnapshot(node.first),
+      second: buildTileSnapshot(node.second),
+    };
+  };
+
+  return {
+    workspaces: state.workspaces.map((w) => ({
+      id: w.id,
+      name: w.name,
+      root: buildTileSnapshot(w.root),
+      focusedPaneId: w.focusedPaneId,
+    })),
+    activeWorkspaceId: state.activeWorkspaceId,
+  };
+}
+
+export function collectPaneSnapshots(root: any): any[] {
+  if (root.type === "pane") {
+    return [root];
+  }
+  return [
+    ...collectPaneSnapshots(root.first),
+    ...collectPaneSnapshots(root.second),
+  ];
+}

@@ -3,11 +3,13 @@ import React, { useEffect, useRef, useState } from "react";
 import { Terminal } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { WebglAddon } from "@xterm/addon-webgl";
-import { SearchAddon } from "@xterm/addon-search";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
 import { PaneStatusBar } from "./PaneStatusBar";
 import { SplitDirection } from "../types";
+import { useTerminalRegistry } from "../context/TerminalRegistry";
+import { useAppState } from "../state/useAppState";
+import { themes } from "../themes";
 
 interface TerminalPaneProps {
   paneId: string;
@@ -30,47 +32,58 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
   const terminalRef = useRef<HTMLDivElement>(null);
   const termInstance = useRef<Terminal | null>(null);
   const fitAddon = useRef<FitAddon | null>(null);
-  const searchAddon = useRef<SearchAddon | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const [internalCwd, setInternalCwd] = useState(cwd);
   const [internalProc, setInternalProc] = useState(processName);
-  const [showSearch, setShowSearch] = useState(false);
+
+  const { register, unregister } = useTerminalRegistry();
+  const { state } = useAppState();
+
+  const getThemeObject = (themeId: string) => {
+    const theme = themes[themeId] || themes["catppuccin-mocha"];
+    return {
+      background: "transparent",
+      foreground: theme.text,
+      cursor: theme.text,
+      black: theme.surface1,
+      red: theme.red,
+      green: theme.green,
+      yellow: theme.yellow,
+      blue: theme.blue,
+      magenta: theme.accent,
+      cyan: theme.lavender,
+      white: theme.subtext0,
+      brightBlack: theme.surface2,
+      brightRed: theme.red,
+      brightGreen: theme.green,
+      brightYellow: theme.yellow,
+      brightBlue: theme.blue,
+      brightMagenta: theme.accent,
+      brightCyan: theme.lavender,
+      brightWhite: theme.text,
+    };
+  };
 
   useEffect(() => {
     if (!terminalRef.current) return;
 
+    const { font, theme } = state.settings;
+
     const term = new Terminal({
-      fontFamily: '"JetBrains Mono", "Fira Code", monospace',
-      fontSize: 14,
-      theme: {
-        background: "#1E1E2E",
-        foreground: "#CDD6F4",
-        cursor: "#CDD6F4",
-        black: "#45475A",
-        red: "#F38BA8",
-        green: "#A6E3A1",
-        yellow: "#F9E2AF",
-        blue: "#89B4FA",
-        magenta: "#CBA6F7",
-        cyan: "#94E2D5",
-        white: "#BAC2DE",
-        brightBlack: "#585B70",
-        brightRed: "#F38BA8",
-        brightGreen: "#A6E3A1",
-        brightYellow: "#F9E2AF",
-        brightBlue: "#89B4FA",
-        brightMagenta: "#CBA6F7",
-        brightCyan: "#94E2D5",
-        brightWhite: "#A6ADC8",
-      },
+      fontFamily: font.family,
+      fontSize: font.size,
+      cursorStyle: (font.cursorStyle === "beam" ? "bar" : font.cursorStyle) as "block" | "underline" | "bar",
+      cursorBlink: font.cursorBlink,
+      scrollback: font.scrollback,
+      allowTransparency: true,
+      theme: getThemeObject(theme),
     });
 
     termInstance.current = term;
+    register(paneId, term);
     fitAddon.current = new FitAddon();
-    searchAddon.current = new SearchAddon();
 
     term.loadAddon(fitAddon.current);
-    term.loadAddon(searchAddon.current);
 
     term.open(terminalRef.current);
 
@@ -126,25 +139,42 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
 
     return () => {
       term.dispose();
+      unregister(paneId);
       resizeObserver.disconnect();
       if (unlistenData) unlistenData();
       clearInterval(interval);
       invoke("kill_pty", { id: ptyId }).catch(() => {});
     };
-  }, [ptyId]);
+  }, [ptyId, paneId, register, unregister]);
 
   useEffect(() => {
-    const handleOpenSearch = () => {
-      if (isFocused) {
-        setShowSearch((prev) => !prev);
-      }
-    };
-    window.addEventListener("open-search", handleOpenSearch);
-    return () => window.removeEventListener("open-search", handleOpenSearch);
-  }, [isFocused]);
+    if (termInstance.current) {
+      termInstance.current.options.theme = getThemeObject(state.settings.theme);
+      termInstance.current.refresh(0, termInstance.current.rows - 1);
+    }
+  }, [state.settings.theme]);
 
   const handleContainerClick = () => {
     onFocus();
+  };
+
+  const getFocusStyle = () => {
+    const baseStyle: React.CSSProperties = {
+      border: `var(--border-width) solid ${isFocused ? "var(--border-color)" : "transparent"}`,
+      borderRadius: "var(--corner-radius)",
+      padding: "var(--pane-padding)",
+      backgroundColor: `rgba(var(--theme-background-rgb), calc(1 - var(--transparency) / 100))`,
+      backdropFilter: `blur(var(--blur))`,
+    };
+
+    const focusAnim = getComputedStyle(document.documentElement).getPropertyValue("--focus-animation").trim();
+    if (focusAnim === "fade") {
+      baseStyle.transition = "border-color var(--animation-duration) ease";
+    } else if (focusAnim === "spring") {
+      baseStyle.transition = "border-color var(--animation-duration) cubic-bezier(0.34, 1.56, 0.64, 1)";
+    }
+
+    return baseStyle;
   };
 
   return (
@@ -152,24 +182,9 @@ export const TerminalPane: React.FC<TerminalPaneProps> = ({
       ref={containerRef}
       onClick={handleContainerClick}
       data-pane-id={paneId}
-      className={`flex flex-col w-full h-full border ${isFocused ? "border-mauve" : "border-transparent"} box-border overflow-hidden bg-base relative`}
+      className="flex flex-col w-full h-full box-border overflow-hidden relative"
+      style={getFocusStyle()}
     >
-      {showSearch && (
-        <div className="absolute top-0 right-0 p-2 bg-mantle border-b border-l border-surface1 z-10 flex space-x-2">
-          <input
-            type="text"
-            className="bg-crust text-text p-1 rounded outline-none border border-surface1"
-            placeholder="Search..."
-            onChange={(e) => searchAddon.current?.findNext(e.target.value)}
-          />
-          <button
-            onClick={() => setShowSearch(false)}
-            className="text-text px-2"
-          >
-            X
-          </button>
-        </div>
-      )}
       <div className="flex-1 overflow-hidden" ref={terminalRef} />
       <PaneStatusBar cwd={internalCwd} processName={internalProc} />
     </div>

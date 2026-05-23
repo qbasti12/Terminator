@@ -45,13 +45,23 @@ export const TileLayout: React.FC<TileLayoutProps> = ({
   }
 
   return (
-    <SplitContainer
-      node={node}
-      focusedPaneId={focusedPaneId}
-      workspaceId={workspaceId}
-      state={state}
-      dispatch={dispatch}
-    />
+    <div
+      style={{
+        width: "100%",
+        height: "100%",
+        gap: "var(--gap-size)",
+        display: "flex",
+        flexDirection: node.type === "split" ? (node.direction === "horizontal" ? "row" : "column") : "column",
+      }}
+    >
+      <SplitContainer
+        node={node}
+        focusedPaneId={focusedPaneId}
+        workspaceId={workspaceId}
+        state={state}
+        dispatch={dispatch}
+      />
+    </div>
   );
 };
 
@@ -107,10 +117,11 @@ const SplitContainer: React.FC<SplitContainerProps> = ({
     <div
       ref={containerRef}
       className={`flex w-full h-full ${isHorizontal ? "flex-row" : "flex-col"} overflow-hidden`}
+      style={{ gap: "var(--gap-size)" }}
     >
       <div
         style={{
-          flexBasis: firstBasis,
+          flexBasis: `calc(${firstBasis} - var(--gap-size) / 2)`,
           flexGrow: 0,
           flexShrink: 0,
           overflow: "hidden",
@@ -125,12 +136,12 @@ const SplitContainer: React.FC<SplitContainerProps> = ({
         />
       </div>
       <div
-        className={`${isHorizontal ? "w-1 h-full cursor-col-resize" : "h-1 w-full cursor-row-resize"} bg-surface1 hover:bg-surface2 transition-colors z-10 flex-shrink-0`}
+        className={`${isHorizontal ? "w-2 h-full cursor-col-resize -ml-1 -mr-1" : "h-2 w-full cursor-row-resize -mt-1 -mb-1"} hover:bg-surface2/50 transition-colors z-10 flex-shrink-0`}
         onMouseDown={handleMouseDown}
       />
       <div
         style={{
-          flexBasis: secondBasis,
+          flexBasis: `calc(${secondBasis} - var(--gap-size) / 2)`,
           flexGrow: 1,
           flexShrink: 1,
           overflow: "hidden",
