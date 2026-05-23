@@ -7,6 +7,59 @@ import { invoke } from "@tauri-apps/api/core";
 const defaultSettings: Settings = {
   shell: "/bin/zsh",
   theme: "catppuccin-mocha",
+  appearance: {
+    preset: "minimal",
+    gapSize: 0,
+    borderWidth: 0,
+    borderColor: null,
+    cornerRadius: 0,
+    transparency: 0,
+    blur: 0,
+    padding: 8,
+    focusAnimation: "none",
+    animationDuration: 120,
+  },
+  font: {
+    family: "JetBrains Mono",
+    size: 13,
+    cursorStyle: "block",
+    cursorBlink: true,
+    scrollback: 5000,
+  },
+  presets: [
+    {
+      name: "Minimal",
+      builtIn: true,
+      appearance: {
+        preset: "minimal",
+        gapSize: 0,
+        borderWidth: 0,
+        borderColor: null,
+        cornerRadius: 0,
+        transparency: 0,
+        blur: 0,
+        padding: 4,
+        focusAnimation: "none",
+        animationDuration: 0,
+      },
+    },
+    {
+      name: "Fancy",
+      builtIn: true,
+      appearance: {
+        preset: "fancy",
+        gapSize: 8,
+        borderWidth: 2,
+        borderColor: "accent",
+        cornerRadius: 8,
+        transparency: 15,
+        blur: 12,
+        padding: 12,
+        focusAnimation: "fade",
+        animationDuration: 150,
+      },
+    },
+  ],
   keybindings: {
     newWorkspace: "Meta+Shift+T",
     closeWorkspace: "Meta+Shift+W",
@@ -18,6 +71,7 @@ const defaultSettings: Settings = {
     focusRight: "Meta+ArrowRight",
     openSearch: "Meta+F",
     openSettings: "Meta+Comma",
+    commandPalette: "Meta+Shift+P",
     switchWorkspace1: "Meta+1",
     switchWorkspace2: "Meta+2",
     switchWorkspace3: "Meta+3",
@@ -78,6 +132,14 @@ export function useAppState() {
             ...state,
             workspaces: nextWorkspaces,
             activeWorkspaceId: nextActiveId,
+          };
+        }
+        case "RENAME_WORKSPACE": {
+          return {
+            ...state,
+            workspaces: state.workspaces.map(w =>
+              w.id === action.id ? { ...w, name: action.name } : w
+            ),
           };
         }
         case "SWITCH_WORKSPACE":
@@ -184,6 +246,109 @@ export function useAppState() {
           return { ...state, settingsOpen: false };
         case "SAVE_SETTINGS":
           return { ...state, settings: action.settings, settingsOpen: false };
+        case "SET_THEME":
+          return { ...state, settings: { ...state.settings, theme: action.theme } };
+        case "SET_APPEARANCE":
+          return { ...state, settings: { ...state.settings, appearance: action.appearance } };
+        case "SET_FONT":
+          return { ...state, settings: { ...state.settings, font: action.font } };
+        case "APPLY_PRESET": {
+          const preset = state.settings.presets.find(p => p.name.toLowerCase() === action.presetName.toLowerCase());
+          if (preset) {
+            return {
+              ...state,
+              settings: {
+                ...state.settings,
+                appearance: { ...preset.appearance, preset: action.presetName.toLowerCase() }
+              }
+            };
+          }
+          return state;
+        }
+        case "SAVE_PRESET": {
+          const newPreset = {
+            name: action.name,
+            builtIn: false,
+            appearance: { ...state.settings.appearance, preset: action.name.toLowerCase() },
+          };
+          return {
+            ...state,
+            settings: {
+              ...state.settings,
+              presets: [...state.settings.presets.filter(p => p.name !== action.name), newPreset],
+              appearance: { ...state.settings.appearance, preset: action.name.toLowerCase() }
+            }
+          };
+        }
+        case "DELETE_PRESET":
+          return {
+            ...state,
+            settings: {
+              ...state.settings,
+              presets: state.settings.presets.filter(p => p.name !== action.name),
+              appearance: state.settings.appearance.preset === action.name.toLowerCase()
+                ? { ...state.settings.appearance, preset: "custom" }
+                : state.settings.appearance
+            }
+          };
+        case "OPEN_COMMAND_PALETTE":
+          return { ...state, commandPaletteOpen: true };
+        case "CLOSE_COMMAND_PALETTE":
+          return { ...state, commandPaletteOpen: false };
+        case "RESTORE_SESSION": {
+          const restoreRoot = (node: any): TileNode => {
+            if (node.type === "pane") {
+              return {
+                type: "pane",
+                id: node.id,
+                ptyId: "",
+                cwd: node.cwd,
+                processName: "shell",
+              };
+            }
+            return {
+              type: "split",
+              id: node.id,
+              direction: node.direction,
+              ratio: node.ratio,
+              first: restoreRoot(node.first),
+              second: restoreRoot(node.second),
+            };
+          };
+
+          return {
+            ...state,
+            workspaces: action.snapshot.workspaces.map((w: any) => ({
+              id: w.id,
+              name: w.name,
+              root: restoreRoot(w.root),
+              focusedPaneId: w.focusedPaneId,
+            })),
+            activeWorkspaceId: action.snapshot.activeWorkspaceId,
+          };
+        }
+        case "SET_PTY_ID": {
+          const updatePtyId = (node: TileNode): TileNode => {
+            if (node.type === "pane") {
+              if (node.id === action.paneId) {
+                return { ...node, ptyId: action.ptyId };
+              }
+              return node;
+            }
+            return {
+              ...node,
+              first: updatePtyId(node.first),
+              second: updatePtyId(node.second),
+            };
+          };
+          return {
+            ...state,
+            workspaces: state.workspaces.map((w) => ({
+              ...w,
+              root: updatePtyId(w.root),
+            })),
+          };
+        }
         default:
           return state;
       }

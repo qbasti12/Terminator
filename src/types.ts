@@ -34,11 +34,42 @@ export interface AppState {
   activeWorkspaceId: string;
   settings: Settings;
   settingsOpen: boolean;
+  commandPaletteOpen?: boolean;
+}
+
+export interface AppearanceSettings {
+  preset: string;
+  gapSize: number;
+  borderWidth: number;
+  borderColor: string | null;
+  cornerRadius: number;
+  transparency: number;
+  blur: number;
+  padding: number;
+  focusAnimation: string;
+  animationDuration: number;
+}
+
+export interface FontSettings {
+  family: string;
+  size: number;
+  cursorStyle: "block" | "beam" | "underline";
+  cursorBlink: boolean;
+  scrollback: number;
+}
+
+export interface Preset {
+  name: string;
+  builtIn: boolean;
+  appearance: AppearanceSettings;
 }
 
 export interface Settings {
   shell: string;
   theme: string;
+  appearance: AppearanceSettings;
+  font: FontSettings;
+  presets: Preset[];
   keybindings: Record<string, string>;
 }
 
@@ -55,4 +86,15 @@ export type Action =
   | { type: "SET_SPLIT_RATIO"; splitId: string; ratio: number }
   | { type: "OPEN_SETTINGS" }
   | { type: "CLOSE_SETTINGS" }
-  | { type: "SAVE_SETTINGS"; settings: Settings };
+  | { type: "SAVE_SETTINGS"; settings: Settings }
+  | { type: "RESTORE_SESSION"; snapshot: any }
+  | { type: "SET_PTY_ID"; paneId: string; ptyId: string }
+  | { type: "SET_THEME"; theme: string }
+  | { type: "SET_APPEARANCE"; appearance: AppearanceSettings }
+  | { type: "SET_FONT"; font: FontSettings }
+  | { type: "APPLY_PRESET"; presetName: string }
+  | { type: "SAVE_PRESET"; name: string }
+  | { type: "DELETE_PRESET"; name: string }
+  | { type: "OPEN_COMMAND_PALETTE" }
+  | { type: "CLOSE_COMMAND_PALETTE" }
+  | { type: "RENAME_WORKSPACE"; id: string; name: string };

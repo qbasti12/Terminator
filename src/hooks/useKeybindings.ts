@@ -119,6 +119,8 @@ export function useKeybindings(state: AppState, dispatch: React.Dispatch<any>) {
             id: state.workspaces[num - 1].id,
           });
         }
+      } else if (bindingCombo === keybindings.commandPalette) {
+        dispatch({ type: "OPEN_COMMAND_PALETTE" });
       } else if (
         bindingCombo === keybindings.focusUp ||
         bindingCombo === keybindings.focusDown ||
